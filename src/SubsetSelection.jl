@@ -97,7 +97,7 @@ INPUTS
 - X (n×p)     Array of inputs.
 - indInit     (optional) Initial subset of features s
 - αInit       (optional) Initial dual variable α
-- γ           (optional) ℓ2 regularization penalty
+- gamma       (optional) ℓ2 regularization penalty
 - intercept   (optional) Boolean. If true, an intercept term is computed as well
 - maxIter     (optional) Total number of Iterations
 - δ           (optional) Gradient stepsize
@@ -109,7 +109,7 @@ OUTPUT
 - SparseEstimator """
 function subsetSelection(ℓ::LossFunction, Card::Sparsity, Y, X;
     indInit = ind_init(Card, size(X,2)), αInit=alpha_init(ℓ, Y),
-    γ = 1/sqrt(size(X,1)),  intercept = false,
+    gamma = 1/sqrt(size(X,1)),  intercept = false,
     maxIter = 100, δ = 1e-3, gradUp = 10,
     anticycling = false, averaging = true)
 
@@ -134,7 +134,7 @@ function subsetSelection(ℓ::LossFunction, Card::Sparsity, Y, X;
 
     #Gradient ascent on α
     for inner_iter in 1:min(gradUp, div(p, n_indices))
-      ∇ = grad_dual(ℓ, Y, X, α, indices, n_indices, γ, cache)
+      ∇ = grad_dual(ℓ, Y, X, α, indices, n_indices, gamma, cache)
       α .+= δ*∇
       α = proj_dual(ℓ, Y, α)
       α = proj_intercept(intercept, α)
@@ -146,7 +146,7 @@ function subsetSelection(ℓ::LossFunction, Card::Sparsity, Y, X;
 
     #Minimization w.r.t. s
     indices_old[1:n_indices] = indices[1:n_indices]
-    n_indices = partial_min!(indices, Card, X, α, γ, cache)
+    n_indices = partial_min!(indices, Card, X, α, gamma, cache)
 
     #Anticycling rule: Stop if indices_old == indices
     if anticycling && indices_same(indices, indices_old, n_indices)
@@ -159,11 +159,11 @@ function subsetSelection(ℓ::LossFunction, Card::Sparsity, Y, X;
 
   ##Compute sparse estimator
   #Subset of relevant features
-  n_indices = partial_min!(indices, Card, X, averaging ? a : α, γ, cache)
+  n_indices = partial_min!(indices, Card, X, averaging ? a : α, gamma, cache)
   #Regressor
-  w = [-γ * dot(X[:, indices[j]], a) for j in 1:n_indices]
+  w = [-gamma * dot(X[:, indices[j]], a) for j in 1:n_indices]
   #Bias
-  b = compute_bias(ℓ, Y, X, a, indices, n_indices, γ, intercept, cache)
+  b = compute_bias(ℓ, Y, X, a, indices, n_indices, gamma, intercept, cache)
 
   #Resize final indices vector to only have relevant entries
   resize!(indices, n_indices)
@@ -239,19 +239,19 @@ function fenchel(ℓ::L2SVM, y, a)
 end
 
 ##Dual objective function value for a given dual variable α
-function dual(ℓ::LossFunction, Y, X, α, indices, n_indices, γ)
+function dual(ℓ::LossFunction, Y, X, α, indices, n_indices, gamma)
   v = 0.
   for i in 1:size(X, 1)
     v += -fenchel(ℓ, Y[i], α[i])
   end
   for j in 1:n_indices
-    v -= γ/2*(dot(X[:, indices[j]], α)^2)
+    v -= gamma/2*(dot(X[:, indices[j]], α)^2)
   end
   return v
 end
 
 ##Point-wise derivative of the Fenchel conjugate for each loss function
-function grad_fenchel(ℓ::OLS, y, a)
+function grad_fenchel(::OLS, y, a)
   return a + y
 end
 function grad_fenchel(ℓ::L1SVR, y, a)
@@ -260,26 +260,26 @@ end
 function grad_fenchel(ℓ::L2SVR, y, a)
   return a + y + ℓ.ɛ*sign(a)
 end
-function grad_fenchel(ℓ::LogReg, y, a)
+function grad_fenchel(::LogReg, y, a)
   return y*log(1+a*y) - y*log(-a*y)
 end
-function grad_fenchel(ℓ::L1SVM, y, a)
+function grad_fenchel(::L1SVM, y, a)
   return y
 end
-function grad_fenchel(ℓ::L2SVM, y, a)
+function grad_fenchel(::L2SVM, y, a)
   return a + y
 end
 
 ##Gradient of f w.r.t. the dual variable α
-function grad_dual(ℓ::LossFunction, Y, X, α, indices, n_indices, γ, cache::Cache)
+function grad_dual(ℓ::LossFunction, Y, X, α, indices, n_indices, gamma, cache::Cache)
   g = cache.g
   for i in 1:size(X, 1)
     g[i] = -grad_fenchel(ℓ, Y[i], α[i])
   end
   for j in 1:n_indices
     x = @view(X[:, indices[j]])
-    # @__dot__ g -= γ * dot(x, α) * x
-    g -= γ*dot(x, α)*x
+    # @__dot__ g -= gamma * dot(x, α) * x
+    g -= gamma*dot(x, α)*x
   end
   g
 end
@@ -313,7 +313,7 @@ function proj_intercept(intercept::Bool, α)
 end
 
 ##Minimization w.r.t. s
-function partial_min!(indices, Card::Constraint, X, α, γ, cache::Cache)
+function partial_min!(indices, Card::Constraint, X, α, gamma, cache::Cache)
   ax = cache.ax
   perm = cache.sortperm
   p = size(X,2)
@@ -332,17 +332,17 @@ function partial_min!(indices, Card::Constraint, X, α, γ, cache::Cache)
   return n_indices
 end
 
-function partial_min!(indices, Card::Penalty, X, α, γ, cache::Cache)
+function partial_min!(indices, Card::Penalty, X, α, gamma, cache::Cache)
   ax = cache.ax
 
   # compute (α'*X).^2 into pre-allocated scratch space
   Ac_mul_B!(ax, X, α)
   map!(abs2, ax, ax)
 
-  # find indices with `λ - γ / 2 * (a'X_j)^2 < 0`
+  # find indices with `λ - gamma / 2 * (a'X_j)^2 < 0`
   n_indices = 0
   for j = 1:size(X,2)
-    if Card.λ - γ / 2 * ax[j] < 0
+    if Card.λ - gamma / 2 * ax[j] < 0
       n_indices += 1
       indices[n_indices] = j
     end
@@ -352,10 +352,10 @@ function partial_min!(indices, Card::Penalty, X, α, γ, cache::Cache)
 end
 
 ##Bias term
-function compute_bias(ℓ::LossFunction, Y, X, α, indices, n_indices, γ,
+function compute_bias(ℓ::LossFunction, Y, X, α, indices, n_indices, gamma,
                       intercept::Bool, cache::Cache)
   if intercept
-    g = grad_dual(ℓ, Y, X, α, indices, n_indices, γ, cache)
+    g = grad_dual(ℓ, Y, X, α, indices, n_indices, gamma, cache)
     return (minimum(g[α != 0.]) + maximum(g[α != 0.]))/2
   else
     return 0.
