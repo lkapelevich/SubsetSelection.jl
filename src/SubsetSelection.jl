@@ -159,11 +159,16 @@ function subsetSelection(ℓ::LossFunction, Card::Sparsity, Y, X;
 
   ##Compute sparse estimator
   #Subset of relevant features
-  n_indices = partial_min!(indices, Card, X, averaging ? a : α, gamma, cache)
+  if averaging
+      aa = a
+  else
+      aa = α
+  end
+  n_indices = partial_min!(indices, Card, X, aa, gamma, cache)
   #Regressor
-  w = [-gamma * dot(X[:, indices[j]], a) for j in 1:n_indices]
+  w = [-gamma * dot(X[:, indices[j]], aa) for j in 1:n_indices]
   #Bias
-  b = compute_bias(ℓ, Y, X, a, indices, n_indices, gamma, intercept, cache)
+  b = compute_bias(ℓ, Y, X, aa, indices, n_indices, gamma, intercept, cache)
 
   #Resize final indices vector to only have relevant entries
   resize!(indices, n_indices)
